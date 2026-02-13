@@ -12,11 +12,14 @@ eval_task_name: ${dataset.name}
 pretrain_checkpoint_path: null
 
 num_steps: 100000
-eval_every: 10000
+eval_every: 3000
 save_every: 10000
-rollout_every: 10000
+rollout_every: 3000
 num_rollouts: 50
 rollout_length: 1000
+eval_use_future_obs: false
+eval_future_obs_in_env: false
+eval_use_predicted_future_obs: false
 
 batch_size: 36
 num_frames: 19

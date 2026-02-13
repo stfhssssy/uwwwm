@@ -18,6 +18,7 @@ obs_encoder:
   vision_backbone: resnet
   use_low_dim: False
   use_language: False
+  use_goal_image_cond: False
 embed_dim: 768
 timestep_embed_dim: 512
 latent_patch_shape: [2, 4, 4]

@@ -27,23 +27,29 @@ def init_wandb(config, job_type):
         job_type: "train" or "eval"
     """
     run_id_path = os.path.join(config.logdir, f"run_id_{job_type}.json")
-    if config.resume and os.path.exists(run_id_path):
+    if os.path.exists(run_id_path):
         # Load WANDB run ID from log directory
         with open(run_id_path, "r") as f:
             run_id = json.load(f)["run_id"]
+        resume_mode = "must" if config.resume else "allow"
     else:
         # Generate new WANDB run ID
         run_id = wandb.util.generate_id()
+        os.makedirs(config.logdir, exist_ok=True)
         with open(run_id_path, "w") as f:
             json.dump({"run_id": run_id}, f)
+        resume_mode = "never"
 
+    project = os.environ.get("WANDB_PROJECT", "UWM-finetune")
+    entity = os.environ.get("WANDB_ENTITY", "siyuan016-nanyang-technological-university-singapore")
     wandb.init(
-        project="video-action-learning",
+        project=project,
+        entity=entity,
         job_type=job_type,
         group=config.algo,
         name="_".join([config.exp_id, str(config.seed)]),
         config=OmegaConf.to_container(config, resolve=True),
-        resume=config.resume,
+        resume=resume_mode,
         id=run_id,
     )
 

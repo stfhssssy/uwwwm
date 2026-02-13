@@ -144,6 +144,7 @@ class DroidDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         # Sample a sequence of observations and actions from the dataset
         data = self.sampler.sample_sequence(idx)
+        goal_data = self.sampler.sample_episode_final_step(idx)
 
         # Normalize low-dim observations
         if hasattr(self, "lowdim_normalizer"):
@@ -156,9 +157,13 @@ class DroidDataset(Dataset):
 
         # Convert data to torch tensors
         data = {k: torch.from_numpy(v) for k, v in data.items()}
+        goal_obs = {
+            key: torch.from_numpy(goal_data[f"obs.{key}"]) for key in self._image_shapes
+        }
 
         # Unflatten observations
         data = unflatten_obs(data)
+        data["goal_obs"] = goal_obs
         return data
 
     def get_validation_dataset(self):
@@ -247,7 +252,12 @@ class DroidMixtureDataset(Dataset):
             data["action_mask"] = torch.tensor(1, dtype=torch.bool)
         else:
             data = self.video_sampler.sample_sequence(dataset_idx)
+            goal_data = self.video_sampler.sample_episode_final_step(dataset_idx)
             data = {k: torch.from_numpy(v) for k, v in data.items()}
             data = unflatten_obs(data)
+            data["goal_obs"] = {
+                key: torch.from_numpy(goal_data[f"obs.{key}"])
+                for key in self.base_dataset._image_shapes
+            }
             data["action_mask"] = torch.tensor(0, dtype=torch.bool)
         return data

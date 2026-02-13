@@ -54,6 +54,30 @@ class RoboMimicEnvWrapper:
 
         return self._get_obs()
 
+    def reset_to_state(self, state):
+        self.seed(0)
+        self.obs_buffer.clear()
+        if self.record:
+            self.video_buffer.clear()
+        self._elapsed_steps = 0
+
+        # Prefer robomimic-style reset_to when available
+        if hasattr(self.env, "reset_to"):
+            obs = self.env.reset_to(state)
+        else:
+            obs = self.env.reset()
+            if hasattr(self.env, "set_state"):
+                self.env.set_state(state)
+                if hasattr(self.env, "_get_observations"):
+                    obs = self.env._get_observations()
+                elif hasattr(self.env, "get_observation"):
+                    obs = self.env.get_observation()
+
+        # Pad observation buffer
+        for _ in range(self.obs_buffer.maxlen):
+            self.obs_buffer.append(obs)
+        return self._get_obs()
+
     def step(self, actions):
         # Roll out a sequence of actions in the environment
         total_reward = 0

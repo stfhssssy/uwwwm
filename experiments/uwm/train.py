@@ -19,18 +19,30 @@ from datasets.utils.loader import make_distributed_data_loader
 from experiments.utils import set_seed, init_wandb, init_distributed, is_main_process
 
 
-def process_batch(batch, obs_horizon, action_horizon, device):
+def process_batch(
+    batch,
+    obs_horizon,
+    action_horizon,
+    device,
+    use_goal_image_cond: bool = False,
+):
     action_start = obs_horizon - 1
     action_end = action_start + action_horizon
     curr_obs = {k: v[:, : action_start + 1].to(device) for k, v in batch["obs"].items()}
     next_obs = {k: v[:, action_end:].to(device) for k, v in batch["obs"].items()}
     actions = batch["action"][:, action_start:action_end].to(device)
+    goal_obs = None
+    if use_goal_image_cond:
+        if "goal_obs" in batch:
+            goal_obs = {k: v.to(device) for k, v in batch["goal_obs"].items()}
+        else:
+            goal_obs = {k: v[:, -1:].to(device) for k, v in batch["obs"].items()}
 
     # Add language tokens
     if "input_ids" in batch and "attention_mask" in batch:
         curr_obs["input_ids"] = batch["input_ids"].to(device)
         curr_obs["attention_mask"] = batch["attention_mask"].to(device)
-    return curr_obs, next_obs, actions
+    return curr_obs, next_obs, actions, goal_obs
 
 
 def eval_one_epoch(config, data_loader, device, model, action_normalizer=None):
@@ -65,8 +77,12 @@ def eval_one_epoch(config, data_loader, device, model, action_normalizer=None):
     }
     for batch in tqdm(data_loader, desc="Evaluating", disable=not is_main_process()):
         # ------------ Preprocess data ------------ #
-        curr_obs_dict, next_obs_dict, action_norm = process_batch(
-            batch, config.model.obs_encoder.num_frames, config.model.action_len, device
+        curr_obs_dict, next_obs_dict, action_norm, _ = process_batch(
+            batch,
+            config.model.obs_encoder.num_frames,
+            config.model.action_len,
+            device,
+            False,
         )
 
         with torch.no_grad():
@@ -100,9 +116,7 @@ def eval_one_epoch(config, data_loader, device, model, action_normalizer=None):
             stats["image_mse_marginal"] += marg_mse
 
             # Sample observations from forward dynamics
-            next_obs_hat_forward = model.sample_forward_dynamics(
-                curr_obs_dict, action_norm
-            )
+            next_obs_hat_forward = model.sample_forward_dynamics(curr_obs_dict, action_norm)
             forward_mse = F.mse_loss(next_obs_hat_forward, next_obs)
             dist.all_reduce(forward_mse, op=dist.ReduceOp.AVG)
             stats["image_mse_forward"] += forward_mse
@@ -131,8 +145,12 @@ def train_one_step(config, model, optimizer, scheduler, scaler, batch, device):
     model.train()
 
     # --- Preprocess data ---
-    curr_obs, next_obs, action = process_batch(
-        batch, config.model.obs_encoder.num_frames, config.model.action_len, device
+    curr_obs, next_obs, action, goal_obs = process_batch(
+        batch,
+        config.model.obs_encoder.num_frames,
+        config.model.action_len,
+        device,
+        config.model.obs_encoder.use_goal_image_cond,
     )
 
     # --- UWM Training ---
@@ -140,7 +158,13 @@ def train_one_step(config, model, optimizer, scheduler, scaler, batch, device):
     with torch.autocast(
         device_type="cuda", dtype=torch.bfloat16, enabled=config.use_amp
     ):
-        loss, info = model(curr_obs, next_obs, action, batch.get("action_mask", None))
+        loss, info = model(
+            curr_obs,
+            next_obs,
+            action,
+            batch.get("action_mask", None),
+            goal_obs_dict=goal_obs,
+        )
 
     # Step optimizer
     optimizer.zero_grad()

@@ -23,6 +23,7 @@ class UWMObservationEncoder(nn.Module):
         vision_backbone: str = "vit",
         use_low_dim: bool = True,
         use_language: bool = True,
+        use_goal_image_cond: bool = False,
     ):
         super().__init__()
         self.shape_meta = shape_meta
@@ -68,8 +69,25 @@ class UWMObservationEncoder(nn.Module):
             CLIPTextEncoder(embed_dim=embed_dim) if use_language else None
         )
 
+        # Optional image-goal condition from the episode final frame.
+        self.use_goal_image_cond = use_goal_image_cond
+
         # VAE downsampling
         self.vae = VAEDownsample()
+
+    def encode_goal_obs(self, curr_obs_dict: dict, goal_obs_dict: Optional[dict] = None):
+        if goal_obs_dict is None:
+            # Keep goal condition empty if no goal observation is provided.
+            batch_size = next(iter(curr_obs_dict.values())).shape[0]
+            device = next(iter(curr_obs_dict.values())).device
+            return torch.zeros(
+                batch_size,
+                self.num_views * self.embed_dim,
+                device=device,
+            )
+        goal_imgs = self.apply_transform(goal_obs_dict)
+        goal_feats = self.img_encoder(goal_imgs)  # (B, V*D)
+        return goal_feats
 
     def apply_transform(self, obs_dicts: Union[dict, list[dict]]):
         """
@@ -142,10 +160,14 @@ class UWMObservationEncoder(nn.Module):
             transformed_imgs = list(transformed_imgs.split(chunk_sizes, dim=0))
         return transformed_imgs
 
-    def encode_curr_obs(self, curr_obs_dict: dict):
+    def encode_curr_obs(self, curr_obs_dict: dict, goal_obs_dict: Optional[dict] = None):
         # Encoder current observations to features
         curr_imgs = self.apply_transform(curr_obs_dict)
         curr_feats = self.img_encoder(curr_imgs)  # (B, V*T*D)
+
+        if self.use_goal_image_cond:
+            goal_feats = self.encode_goal_obs(curr_obs_dict, goal_obs_dict)
+            curr_feats = torch.cat([curr_feats, goal_feats], dim=-1)
 
         if self.use_low_dim:
             low_dims = [curr_obs_dict[key] for key in self.low_dim_keys]
@@ -166,12 +188,21 @@ class UWMObservationEncoder(nn.Module):
         next_latents = self.apply_vae(next_imgs)
         return next_latents
 
-    def encode_curr_and_next_obs(self, curr_obs_dict: dict, next_obs_dict: dict):
+    def encode_curr_and_next_obs(
+        self,
+        curr_obs_dict: dict,
+        next_obs_dict: dict,
+        goal_obs_dict: Optional[dict] = None,
+    ):
         # Apply the same transform to obs and next obs
         curr_imgs, next_imgs = self.apply_transform([curr_obs_dict, next_obs_dict])
 
         # Encode current obs to features
         curr_feats = self.img_encoder(curr_imgs)  # (B, V*T*D)
+
+        if self.use_goal_image_cond:
+            goal_feats = self.encode_goal_obs(curr_obs_dict, goal_obs_dict)
+            curr_feats = torch.cat([curr_feats, goal_feats], dim=-1)
 
         if self.use_low_dim:
             low_dims = [curr_obs_dict[key] for key in self.low_dim_keys]
@@ -196,6 +227,7 @@ class UWMObservationEncoder(nn.Module):
         )
         return (
             self.num_views * self.num_frames * self.embed_dim
+            + int(self.use_goal_image_cond) * self.num_views * self.embed_dim
             + int(self.use_low_dim) * self.num_frames * low_dim_size
             + int(self.use_language) * self.embed_dim
         )

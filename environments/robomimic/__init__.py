@@ -60,10 +60,22 @@ def make_robomimic_env(
         from libero.libero import get_libero_path
 
         # Construct environment kwargs
+        dataset_path_str = str(dataset_path)
+        dataset_name_str = str(dataset_name)
+        suite = "libero_10"
+        if "libero_90" in dataset_path_str or "libero_90" in dataset_name_str:
+            suite = "libero_90"
+        elif "libero_goal" in dataset_path_str or "libero_goal" in dataset_name_str:
+            suite = "libero_goal"
+        elif "libero_object" in dataset_path_str or "libero_object" in dataset_name_str:
+            suite = "libero_object"
+        elif "libero_spatial" in dataset_path_str or "libero_spatial" in dataset_name_str:
+            suite = "libero_spatial"
+
         bddl_file_name = os.path.join(
             get_libero_path("bddl_files"),
-            "libero_10",
-            dataset_path.split("/")[-1].replace("_demo.hdf5", ".bddl"),
+            suite,
+            dataset_path_str.split("/")[-1].replace("_demo.hdf5", ".bddl"),
         )
         env_kwargs = {
             "bddl_file_name": bddl_file_name,

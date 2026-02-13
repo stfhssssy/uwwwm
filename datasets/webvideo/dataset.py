@@ -120,8 +120,10 @@ class MultiviewVideoDataset(Dataset):
             obs_dict[key] = torch.zeros(self.clip_len, *self.lowdim_shapes[key])
 
         # Construct sample
+        goal_obs = {k: v[-1:].clone() for k, v in obs_dict.items() if k in self.image_keys}
         sample = {
             "obs": obs_dict,
+            "goal_obs": goal_obs,
             "action": torch.zeros(self.clip_len, *self.action_shape),
             "action_mask": torch.tensor(0, dtype=torch.bool),
         }

@@ -231,6 +231,7 @@ class UnifiedWorldModel(nn.Module):
         num_inference_steps: int = 10,
         beta_schedule="squaredcos_cap_v2",
         clip_sample=True,
+        force_next_obs_t_max: bool = False,
     ):
         """
         Assumes rgb input: (B, T, H, W, C) uint8 image
@@ -270,18 +271,26 @@ class UnifiedWorldModel(nn.Module):
         # Diffusion scheduler
         self.num_train_steps = num_train_steps
         self.num_inference_steps = num_inference_steps
+        self.force_next_obs_t_max = force_next_obs_t_max
         self.noise_scheduler = DDIMScheduler(
             num_train_timesteps=num_train_steps,
             beta_schedule=beta_schedule,
             clip_sample=clip_sample,
         )
 
-    def forward(self, obs_dict, next_obs_dict, action, action_mask=None):
+    def forward(
+        self,
+        obs_dict,
+        next_obs_dict,
+        action,
+        action_mask=None,
+        goal_obs_dict=None,
+    ):
         batch_size, device = action.shape[0], action.device
 
         # Encode observations
         obs, next_obs = self.obs_encoder.encode_curr_and_next_obs(
-            obs_dict, next_obs_dict
+            obs_dict, next_obs_dict, goal_obs_dict=goal_obs_dict
         )
 
         # Sample diffusion timestep for action
@@ -295,9 +304,17 @@ class UnifiedWorldModel(nn.Module):
 
         # Sample diffusion timestep for next observation
         next_obs_noise = torch.randn_like(next_obs)
-        next_obs_t = torch.randint(
-            low=0, high=self.num_train_steps, size=(batch_size,), device=device
-        ).long()
+        if self.force_next_obs_t_max:
+            next_obs_t = torch.full(
+                (batch_size,),
+                self.num_train_steps - 1,
+                device=device,
+                dtype=torch.long,
+            )
+        else:
+            next_obs_t = torch.randint(
+                low=0, high=self.num_train_steps, size=(batch_size,), device=device
+            ).long()
         noisy_next_obs = self.noise_scheduler.add_noise(
             next_obs, next_obs_noise, next_obs_t
         )
@@ -319,13 +336,13 @@ class UnifiedWorldModel(nn.Module):
         return loss, info
 
     @torch.no_grad()
-    def sample(self, obs_dict):
-        return self.sample_marginal_action(obs_dict)
+    def sample(self, obs_dict, goal_obs_dict=None):
+        return self.sample_marginal_action(obs_dict, goal_obs_dict=goal_obs_dict)
 
     @torch.no_grad()
-    def sample_forward_dynamics(self, obs_dict, action):
+    def sample_forward_dynamics(self, obs_dict, action, goal_obs_dict=None):
         # Encode observations
-        obs = self.obs_encoder.encode_curr_obs(obs_dict)
+        obs = self.obs_encoder.encode_curr_obs(obs_dict, goal_obs_dict=goal_obs_dict)
 
         # Initialize next observation sample
         next_obs_sample = torch.randn(
@@ -345,10 +362,10 @@ class UnifiedWorldModel(nn.Module):
         return next_obs_sample
 
     @torch.no_grad()
-    def sample_inverse_dynamics(self, obs_dict, next_obs_dict):
+    def sample_inverse_dynamics(self, obs_dict, next_obs_dict, goal_obs_dict=None):
         # Encode observations
         obs_feat, next_obs = self.obs_encoder.encode_curr_and_next_obs(
-            obs_dict, next_obs_dict
+            obs_dict, next_obs_dict, goal_obs_dict=goal_obs_dict
         )
 
         # Initialize action sample
@@ -369,8 +386,8 @@ class UnifiedWorldModel(nn.Module):
         return action_sample
 
     @torch.no_grad()
-    def sample_marginal_next_obs(self, obs_dict):
-        obs_feat = self.obs_encoder.encode_curr_obs(obs_dict)
+    def sample_marginal_next_obs(self, obs_dict, goal_obs_dict=None):
+        obs_feat = self.obs_encoder.encode_curr_obs(obs_dict, goal_obs_dict=goal_obs_dict)
 
         # Initialize action and next_obs
         action_sample = torch.randn(
@@ -393,8 +410,8 @@ class UnifiedWorldModel(nn.Module):
         return next_obs_sample
 
     @torch.no_grad()
-    def sample_marginal_action(self, obs_dict):
-        obs_feat = self.obs_encoder.encode_curr_obs(obs_dict)
+    def sample_marginal_action(self, obs_dict, goal_obs_dict=None):
+        obs_feat = self.obs_encoder.encode_curr_obs(obs_dict, goal_obs_dict=goal_obs_dict)
 
         # Initialize action and next_obs
         action_sample = torch.randn(
@@ -417,8 +434,8 @@ class UnifiedWorldModel(nn.Module):
         return action_sample
 
     @torch.no_grad()
-    def sample_joint(self, obs_dict):
-        obs_feat = self.obs_encoder.encode_curr_obs(obs_dict)
+    def sample_joint(self, obs_dict, goal_obs_dict=None):
+        obs_feat = self.obs_encoder.encode_curr_obs(obs_dict, goal_obs_dict=goal_obs_dict)
 
         # Initialize action and next_obs
         action_sample = torch.randn(

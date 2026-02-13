@@ -1,8 +1,9 @@
 defaults:
-  - dataset: libero_90
+  - dataset: libero_mug_mug
   - model: uwm
   - template_train_robomimic
   - _self_
 
 model:
   num_registers: 24
+  force_next_obs_t_max: false

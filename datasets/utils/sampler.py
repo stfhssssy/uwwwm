@@ -48,3 +48,25 @@ class TrajectorySampler:
             value = arr[start:end]
             data[key] = value
         return data
+
+    def sample_episode_final_step(self, index: int) -> dict[str, np.ndarray]:
+        """
+        Sample the final step from the episode that contains the current sequence index.
+
+        Args:
+            index: Index into `self.indices`, i.e., the same index used by `sample_sequence`.
+
+        Returns:
+            A dictionary containing one-step arrays for all buffer keys at the final
+            timestep of the corresponding episode. Each value has shape (1, ...).
+        """
+        start, _ = self.indices[index]
+        episode_idx = np.searchsorted(self.buffer.episode_ends, start, side="right")
+        episode_end = int(self.buffer.episode_ends[episode_idx])
+        final_step = episode_end - 1
+
+        data = {}
+        for key in self.keys:
+            arr = self.buffer[key]
+            data[key] = arr[final_step : final_step + 1]
+        return data

@@ -1,4 +1,7 @@
+import h5py
 import hydra
+import inspect
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -9,6 +12,7 @@ from omegaconf import OmegaConf
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import trange, tqdm
 
+from datasets.utils.file_utils import glob_all
 from datasets.utils.loader import make_distributed_data_loader
 from environments.robomimic import make_robomimic_env
 from experiments.utils import set_seed, init_wandb, init_distributed, is_main_process
@@ -20,47 +24,139 @@ from experiments.uwm.train import (
 )
 
 
+def sanitize_task_name(name: str) -> str:
+    task_name = name.replace(".hdf5", "").replace("_demo", "")
+    task_name = task_name.replace("/", "_").replace(" ", "_")
+    return task_name
+
+
+def get_rgb_obs_keys(shape_meta: dict) -> list[str]:
+    return [k for k, v in shape_meta["obs"].items() if v["type"] == "rgb"]
+
+
+def build_goal_image_pool(
+    shape_meta: dict, hdf5_paths: list[str], flip_rgb: bool = False
+) -> dict[str, torch.Tensor]:
+    rgb_keys = get_rgb_obs_keys(shape_meta)
+    goal_pool = {k: [] for k in rgb_keys}
+
+    for hdf5_path in hdf5_paths:
+        with h5py.File(hdf5_path) as f:
+            demos = f["data"]
+            for i in range(len(demos)):
+                demo = demos[f"demo_{i}"]
+                for key in rgb_keys:
+                    goal_frame = demo["obs"][key][-1:]
+                    if flip_rgb:
+                        goal_frame = goal_frame[:, ::-1].copy()
+                    goal_pool[key].append(goal_frame)
+
+    if len(goal_pool[rgb_keys[0]]) == 0:
+        raise RuntimeError("No goal images found when building goal pool.")
+
+    goal_pool = {
+        key: torch.from_numpy(np.stack(goal_frames, axis=0))
+        for key, goal_frames in goal_pool.items()
+    }
+    return goal_pool
+
+
+def get_rollout_goal(
+    goal_pool: dict[str, torch.Tensor] | None, rollout_index: int, device
+) -> dict[str, torch.Tensor] | None:
+    if goal_pool is None:
+        return None
+    num_goals = next(iter(goal_pool.values())).shape[0]
+    goal_idx = rollout_index % num_goals
+    return {key: value[goal_idx : goal_idx + 1].to(device) for key, value in goal_pool.items()}
+
+
+def get_rollout_tasks(config) -> list[dict]:
+    hdf5_paths = glob_all(config.dataset.hdf5_path_globs)
+    if len(hdf5_paths) == 0:
+        raise RuntimeError("No hdf5 files found for rollout evaluation.")
+
+    # Treat each dataset file as one eval task.
+    task_specs = []
+    for hdf5_path in hdf5_paths:
+        task_name = sanitize_task_name(hdf5_path.split("/")[-1])
+        task_specs.append(
+            {
+                "task_name": task_name,
+                "dataset_path": hdf5_path,
+                "hdf5_paths": [hdf5_path],
+            }
+        )
+    return task_specs
+
+
 def collect_rollout(config, model, device):
     model.eval()
     model = getattr(model, "module", model)  # unwrap DDP
+    supports_goal_obs = "goal_obs_dict" in inspect.signature(model.sample).parameters
 
-    # Create eval environment
-    assert isinstance(config.dataset.hdf5_path_globs, str)
-    env = make_robomimic_env(
-        dataset_name=config.dataset.name,
-        dataset_path=config.dataset.hdf5_path_globs,
-        shape_meta=config.dataset.shape_meta,
-        obs_horizon=model.obs_encoder.num_frames,
-        max_episode_length=config.rollout_length,
-        record=True,
-    )
+    rollout_stats = {}
+    task_specs = get_rollout_tasks(config)
+    rollouts_per_task = config.num_rollouts
 
-    # Collect rollouts
-    successes = []
-    for e in trange(
-        config.num_rollouts, desc="Collecting rollouts", disable=not is_main_process()
-    ):
-        env.seed(e)
-        obs = env.reset()
-        done = False
-        while not done:
-            obs_tensor = {
-                k: torch.tensor(v, device=device)[None] for k, v in obs.items()
-            }
+    for task_spec in task_specs:
+        task_name = task_spec["task_name"]
 
-            # Sample action from model
-            action = model.sample(obs_tensor)[0].cpu().numpy()
+        # Create task-specific eval environment
+        env = make_robomimic_env(
+            dataset_name=config.dataset.name,
+            dataset_path=task_spec["dataset_path"],
+            shape_meta=config.dataset.shape_meta,
+            obs_horizon=model.obs_encoder.num_frames,
+            max_episode_length=config.rollout_length,
+            record=True,
+        )
 
-            # Step environment
-            obs, reward, done, info = env.step(action)
-        successes.append(info["success"])
+        goal_pool = None
+        if getattr(model.obs_encoder, "use_goal_image_cond", False):
+            goal_pool = build_goal_image_pool(
+                shape_meta=config.dataset.shape_meta,
+                hdf5_paths=task_spec["hdf5_paths"],
+                flip_rgb=getattr(config.dataset, "flip_rgb", False),
+            )
+            print(
+                f"Loaded {next(iter(goal_pool.values())).shape[0]} goal images for task {task_name}."
+            )
 
-    # Compute success rate
-    success_rate = sum(successes) / len(successes)
+        successes = []
+        for e in trange(
+            rollouts_per_task,
+            desc=f"Collecting {task_name}",
+            disable=not is_main_process(),
+        ):
+            env.seed(e)
+            obs = env.reset()
+            goal_obs_tensor = get_rollout_goal(goal_pool, e, device)
+            done = False
+            while not done:
+                obs_tensor = {
+                    k: torch.tensor(v, device=device)[None] for k, v in obs.items()
+                }
 
-    # Record video of the last episode
-    video = env.get_video()
-    return success_rate, video
+                # Keep compatibility with models that do not accept goal_obs_dict.
+                if supports_goal_obs:
+                    action = model.sample(obs_tensor, goal_obs_dict=goal_obs_tensor)
+                else:
+                    action = model.sample(obs_tensor)
+                action = action[0].cpu().numpy()
+
+                # Step environment
+                obs, reward, done, info = env.step(action)
+            successes.append(info["success"])
+
+        success_rate = sum(successes) / len(successes)
+        rollout_stats[task_name] = {
+            "success_rate": success_rate,
+            "video": env.get_video(),
+        }
+        env.close()
+
+    return rollout_stats
 
 
 def maybe_collect_rollout(config, step, model, device):
@@ -72,16 +168,25 @@ def maybe_collect_rollout(config, step, model, device):
     if is_main_process() and (
         step % config.rollout_every == 0 or step == (config.num_steps - 1)
     ):
-        success_rate, video = collect_rollout(config, model, device)
-        print(f"Step: {step} success rate: {success_rate}")
-        # Video shape: (T, H, W, C) -> (N, T, C, H, W)
-        video = video.transpose(0, 3, 1, 2)[None]
-        wandb.log(
-            {
-                "rollout/success_rate": success_rate,
-                "rollout/video": wandb.Video(video, fps=10),
-            }
-        )
+        rollout_stats = collect_rollout(config, model, device)
+        log_data = {}
+        success_rates = []
+        first_video = None
+        for task_name, task_stats in rollout_stats.items():
+            success_rate = task_stats["success_rate"]
+            video_np = task_stats["video"].transpose(0, 3, 1, 2)[None]
+            success_rates.append(success_rate)
+            print(f"Step: {step}, task: {task_name}, success rate: {success_rate}")
+            log_data[f"rollout/{task_name}/success_rate"] = success_rate
+            log_data[f"rollout/{task_name}/video"] = wandb.Video(video_np, fps=10)
+            if first_video is None:
+                first_video = video_np
+
+        # Keep the old aggregate key for backward compatibility with dashboards.
+        log_data["rollout/success_rate"] = float(np.mean(success_rates))
+        if first_video is not None:
+            log_data["rollout/video"] = wandb.Video(first_video, fps=10)
+        wandb.log(log_data)
     dist.barrier()
 
 
