@@ -1,0 +1,12 @@
+{
+  "intro": "Summarize the key changes in the web page based on the following information:\nNew items: {new_items}\nUpdated items: {updated_items}\nDeleted items: {deleted_items}\n\nWhen summarizing, follow these output format:\n1. [First key change]\n2. [Second key change]\n3. [Third key change]\n...\n10. [Tenth key change]",
+  "examples":[],
+  "template": "",
+  "meta_data": {
+    "keywords": [
+      "new_items",
+      "updated_items",
+      "deleted_items"
+    ]
+  }
+}

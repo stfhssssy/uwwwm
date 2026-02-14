@@ -1,0 +1,21 @@
+[tool.mypy]
+explicit_package_bases = true
+exclude = [
+    "environment_docker"
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "setuptools.*",
+    "pytest.*",
+    "pytest_asyncio.*",
+    "py.*",
+    "munkres.*",
+    "weave.*",
+    "gradio_client.*",
+    "datasets.*",
+    "google.*",
+    "vertexai.*",
+    "transformers.*"
+]
+ignore_missing_imports = true
