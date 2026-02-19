@@ -230,7 +230,7 @@ class SimpleRoboticDatasetv2(data.Dataset):
         # split
         train=True,
         maxsize=None,
-        image_size=256,
+        image_size=224,
         # action
         load_action=False,
         task_instruction=None,
@@ -574,7 +574,7 @@ class EvalDataset(data.Dataset):
     def __init__(
         self, parent_dir,
         segment_length,
-        image_size=256,
+        image_size=224,
         load_action=False,
         random_ctx_frame=False,
         random_start_frame=False

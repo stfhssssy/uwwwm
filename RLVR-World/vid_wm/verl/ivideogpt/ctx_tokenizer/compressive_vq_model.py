@@ -56,7 +56,7 @@ class CompressiveVQModelFSQ(ModelMixin, ConfigMixin):
         dyn_fsq_levels: int = 12,
         context_length: int = 1,
         max_att_resolution = 32,
-        resolution=256,
+        resolution=224,
         patch_size=4,
     ):
         super().__init__()

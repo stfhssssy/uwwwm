@@ -56,6 +56,33 @@ require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/lang
 MODEL_CONFIG_CLASSES = list(MODEL_MAPPING.keys())
 
 
+def infer_token_grid(num_tokens: int, target_hw=None):
+    if num_tokens <= 0:
+        raise ValueError(f"Invalid num_tokens: {num_tokens}")
+
+    target_ratio = None
+    if target_hw is not None and len(target_hw) == 2:
+        h0, w0 = int(target_hw[0]), int(target_hw[1])
+        if h0 > 0 and w0 > 0:
+            target_ratio = h0 / w0
+
+    best_pair = None
+    best_score = None
+    max_h = int(num_tokens ** 0.5)
+    for h in range(1, max_h + 1):
+        if num_tokens % h != 0:
+            continue
+        w = num_tokens // h
+        score = abs((h / w) - target_ratio) if target_ratio is not None else abs(h - w)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_pair = (h, w)
+
+    if best_pair is None:
+        raise ValueError(f"Cannot infer token grid from num_tokens={num_tokens}")
+    return best_pair
+
+
 def get_dataloaders(args):
     # DataLoaders creation:
     augmentation_args = {
@@ -186,8 +213,8 @@ def parse_args():
     parser.add_argument('--dataset_path', default='/home/NAS/rl_data/frame_action_datasets/',
                         type=str, help='Path to the tensorflow datasets')
     parser.add_argument('--dataset_size', default=None, type=int)
-    parser.add_argument('--resolution', default=256, type=int, nargs='+')
-    parser.add_argument('--resolution_width', default=320, type=int, nargs='+')
+    parser.add_argument('--resolution', default=224, type=int, nargs='+')
+    parser.add_argument('--resolution_width', default=224, type=int, nargs='+')
     parser.add_argument("--dataloader_num_workers", type=int, default=4,
                         help=(
                             "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
@@ -227,7 +254,7 @@ def parse_args():
     parser.add_argument('--eos_token_id', default=4632, type=int)
     parser.add_argument('--vid_multi', default=1, type=int)
     parser.add_argument("--context_length", type=int, default=4)
-    parser.add_argument('--tokens_per_frame', default=320, type=int)
+    parser.add_argument('--tokens_per_frame', default=196, type=int)
 
     parser.add_argument('--processor_type', default='simple')
     parser.add_argument('--tokenizer_micro_batch_size', default=2, type=int)
@@ -309,7 +336,16 @@ def evaluate(args, accelerator, processor, tokenizer, model, eval_dataloader, ev
                     else:
                         raise NotImplementedError
                 output_tokens = output_tokens.clamp(0, args.visual_token_num - 1).long()
-                output_tokens = output_tokens.reshape(*output_tokens.shape[:-1], 16, 20)  # TODO: magic number
+                target_h = args.resolution[0] if isinstance(args.resolution, (list, tuple)) else args.resolution
+                target_w = (
+                    args.resolution_width[0]
+                    if isinstance(args.resolution_width, (list, tuple))
+                    else args.resolution_width
+                )
+                token_h, token_w = infer_token_grid(
+                    args.tokens_per_frame, target_hw=[target_h, target_w]
+                )
+                output_tokens = output_tokens.reshape(*output_tokens.shape[:-1], token_h, token_w)
                 recon_output = accelerator.unwrap_model(tokenizer).decode(
                     output_tokens)
                 recon_output = recon_output.clamp(0.0, 1.0)

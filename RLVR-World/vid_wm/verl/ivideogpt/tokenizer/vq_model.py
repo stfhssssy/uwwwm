@@ -40,7 +40,7 @@ class CNNFSQModel256(ModelMixin, ConfigMixin):
         norm_num_groups: int = 32,
         fsq_levels=12,
         norm_type: str = "group",  # group, spatial
-        resolution=256,
+        resolution=224,
     ):
         super().__init__()
         if isinstance(fsq_levels, int):

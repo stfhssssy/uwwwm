@@ -1165,6 +1165,36 @@ class RayVGPTPPOTrainer(RayPPOTrainer):
         goal = self._progressor_preprocess_frame(goal)
         return torch.cat([init, pred, goal], dim=1)
 
+    @staticmethod
+    def _infer_token_grid(num_tokens: int, target_hw=None):
+        if num_tokens <= 0:
+            raise ValueError(f"Invalid num_tokens: {num_tokens}")
+
+        target_ratio = None
+        if target_hw is not None and len(target_hw) == 2:
+            h0, w0 = int(target_hw[0]), int(target_hw[1])
+            if h0 > 0 and w0 > 0:
+                target_ratio = h0 / w0
+
+        best_pair = None
+        best_score = None
+        max_h = int(num_tokens ** 0.5)
+        for h in range(1, max_h + 1):
+            if num_tokens % h != 0:
+                continue
+            w = num_tokens // h
+            if target_ratio is None:
+                score = abs(h - w)
+            else:
+                score = abs((h / w) - target_ratio)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_pair = (h, w)
+
+        if best_pair is None:
+            raise ValueError(f"Cannot infer token grid from num_tokens={num_tokens}")
+        return best_pair
+
     def _update_progressor_stats(self, r_rlvr: torch.Tensor, r_prog: torch.Tensor):
         rlvr_mean = float(r_rlvr.mean().item())
         rlvr_var = float(r_rlvr.var(unbiased=False).item())
@@ -1342,13 +1372,19 @@ class RayVGPTPPOTrainer(RayPPOTrainer):
         output_tokens = output_tokens.clamp(0, self.config.processor.visual_token_num - 1).long()
         if "ctx_tokens" in batch.batch.keys():
             ctx_tokens = batch.batch["ctx_tokens"]
-            output_tokens = output_tokens.reshape(*output_tokens.shape[:-1], 1, 80)  # TODO: magic number
+            output_tokens = output_tokens.reshape(
+                *output_tokens.shape[:-1], 1, self.config.processor.tokens_per_frame
+            )
             detokenize_output = self.tokenizer_wg.detokenize(
                 DataProto.from_single_dict({"tokens": output_tokens, "ctx_tokens": ctx_tokens}),
                 DataProto.from_single_dict({"real": pixels_before_repeat[:, -1]}, meta_info={'lpips': True, 'loss_weight': self.config.trainer.loss_weight}))
             pred = detokenize_output.batch['pixels'][:, -1]
         else:
-            output_tokens = output_tokens.reshape(*output_tokens.shape[:-1], 16, 20)  # TODO: magic number
+            token_h, token_w = self._infer_token_grid(
+                self.config.processor.tokens_per_frame,
+                target_hw=self.config.data.video.resolution,
+            )
+            output_tokens = output_tokens.reshape(*output_tokens.shape[:-1], token_h, token_w)
             detokenize_output = self.tokenizer_wg.detokenize(
                 DataProto.from_single_dict({"tokens": output_tokens}),
                 DataProto.from_single_dict({"real": pixels_before_repeat[:, -1]}, meta_info={'lpips': True, 'loss_weight': self.config.trainer.loss_weight}))

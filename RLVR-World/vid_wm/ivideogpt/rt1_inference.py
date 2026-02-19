@@ -19,8 +19,8 @@ class RT1Inference:
         self,
         saved_model_path: str = "./pretrained_models/rt_1_x_tf_trained_for_002272480_step",
         lang_embed_model_path: str = "https://tfhub.dev/google/universal-sentence-encoder-large/5",
-        image_width: int = 320,
-        image_height: int = 256,
+        image_width: int = 224,
+        image_height: int = 224,
         action_scale: float = 1.0,
         policy_setup: str = "google_robot",
     ) -> None:
@@ -96,7 +96,7 @@ class RT1Inference:
         # Obtain a dummy observation, where the features are all 0
         self.observation = tf_agents.specs.zero_spec_nest(
             tf_agents.specs.from_spec(self.tfa_policy.time_step_spec.observation)
-        )  # "natural_language_embedding": [512], "image", [256,320,3], "natural_language_instruction": <tf.Tensor: shape=(), dtype=string, numpy=b''>
+        )  # "natural_language_embedding": [512], "image", [224,224,3], "natural_language_instruction": <tf.Tensor: shape=(), dtype=string, numpy=b''>
         # Construct a tf_agents time_step from the dummy observation
         self.tfa_time_step = ts.transition(self.observation, reward=np.zeros((), dtype=np.float32))
         # Initialize the state of the policy
@@ -175,7 +175,7 @@ class RT1Inference:
                 self.reset(task_description)
     
         assert image.dtype == np.uint8
-        image = self._resize_image(image)    # 256*320*3
+        image = self._resize_image(image)    # 224*224*3
         self.observation["image"] = image
         self.history_images.append(image.numpy())
         self.observation["natural_language_embedding"] = self.task_description_embedding

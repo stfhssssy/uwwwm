@@ -189,8 +189,8 @@ def parse_args():
     parser.add_argument('--dataset_path', default='/home/NAS/rl_data/frame_action_datasets/',
                         type=str, help='Path to the tensorflow datasets')
     parser.add_argument('--dataset_size', default=None, type=int)
-    parser.add_argument('--resolution', default=256, type=int, nargs='+')
-    parser.add_argument('--resolution_width', default=320, type=int, nargs='+')
+    parser.add_argument('--resolution', default=224, type=int, nargs='+')
+    parser.add_argument('--resolution_width', default=224, type=int, nargs='+')
     parser.add_argument("--dataloader_num_workers", type=int, default=4,
                         help=(
                             "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
@@ -230,7 +230,7 @@ def parse_args():
     parser.add_argument('--eos_token_id', default=4632, type=int)
     parser.add_argument('--vid_multi', default=1, type=int)
     parser.add_argument("--context_length", type=int, default=4)
-    parser.add_argument('--tokens_per_frame', default=320, type=int)
+    parser.add_argument('--tokens_per_frame', default=196, type=int)
 
     parser.add_argument('--processor_type', default='ctx_msp')
     parser.add_argument('--tokenizer_micro_batch_size', default=2, type=int)

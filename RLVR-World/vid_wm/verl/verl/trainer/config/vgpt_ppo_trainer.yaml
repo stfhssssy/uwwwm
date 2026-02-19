@@ -20,7 +20,7 @@ data:
     segment_length: 5
     oxe_data_mixes_type: frac
     dataset_path: ~/data/frame_action_datasets
-    resolution: [256, 320]
+    resolution: [224, 224]
 
 
 processor:
@@ -40,7 +40,7 @@ processor:
   pad_token_id: 4632
   gen_output_length: ${data.max_response_length}
   gen_input_length: ${data.max_prompt_length}
-  tokens_per_frame: 320
+  tokens_per_frame: 196
   processor_type: simple
 
 actor_rollout_ref:

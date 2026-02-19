@@ -69,7 +69,7 @@ class ConditionalEncoder(Encoder):
         double_z: bool = True,
         mid_block_add_attention=True,
         max_att_resolution=32,
-        init_resolution=256,
+        init_resolution=224,
         context_length=1,
     ):
         super().__init__(
