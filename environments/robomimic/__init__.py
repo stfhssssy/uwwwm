@@ -10,6 +10,7 @@ def make_robomimic_env(
     obs_horizon,
     max_episode_length,
     record=False,
+    terminate_on_success=True,
 ):
     if "robomimic" in dataset_name:
         from robomimic.utils.env_utils import get_env_type, get_env_class
@@ -53,7 +54,12 @@ def make_robomimic_env(
             **env_meta["env_kwargs"],
         )
         env = RoboMimicEnvWrapper(
-            env, all_obs_keys, obs_horizon, max_episode_length, record=record
+            env,
+            all_obs_keys,
+            obs_horizon,
+            max_episode_length,
+            record=record,
+            terminate_on_success=terminate_on_success,
         )
     elif "libero" in dataset_name:
         from libero.libero.envs import OffScreenRenderEnv
@@ -93,7 +99,12 @@ def make_robomimic_env(
         env = OffScreenRenderEnv(**env_kwargs)
         obs_keys = list(shape_meta["obs"].keys())
         env = LIBEROEnvWrapper(
-            env, obs_keys, obs_horizon, max_episode_length, record=record
+            env,
+            obs_keys,
+            obs_horizon,
+            max_episode_length,
+            record=record,
+            terminate_on_success=terminate_on_success,
         )
     else:
         raise NotImplementedError(f"Unsupported environment: {dataset_name}")

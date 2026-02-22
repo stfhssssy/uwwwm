@@ -31,3 +31,6 @@ num_train_steps: 100
 num_inference_steps: 10
 beta_schedule: squaredcos_cap_v2
 clip_sample: True
+use_logprob: False
+logprob_eta: 0.3
+logprob_drop_last: True

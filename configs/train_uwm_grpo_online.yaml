@@ -1,0 +1,148 @@
+defaults:
+  - dataset: libero_black_bowl_plate
+  - model: uwm
+  - _self_
+
+model:
+  num_inference_steps: 10
+  num_registers: 24
+  logprob_eta: 0.9
+  obs_encoder:
+    random_crop: false
+    color_jitter: null
+    use_goal_image_cond: true
+
+hydra:
+  run:
+    dir: logdir/grpo_online/${dataset.name}/${exp_id}/${seed}
+
+algo: uwm_grpo_online
+exp_id: default
+seed: 0
+goal:
+  demo_index: 0
+num_frames: 19
+obs_num_frames: 2
+logdir: ${hydra:run.dir}
+resume: false
+use_amp: false
+
+device: cuda:0
+num_steps: 10000
+rollout_length: 1000
+clip_grad_norm: 1.0
+pretrain_checkpoint_path: /home/ssy/ckpt/uwm/libero_kitchen_scene1_4tasks/pretrain/0/models.pt
+
+optimizer:
+  lr: 5e-6
+  weight_decay: 1e-6
+  betas: [0.9, 0.999]
+  eps: 1e-8
+
+scheduler:
+  name: constant
+
+grpo:
+  num_groups_per_step: 1
+  group_size: 8
+  parallel_rollout_workers: 8
+  required_action_horizon: ${model.action_len}
+  drop_if_any_incomplete: true
+  terminate_on_success: false
+  decode_pred_obs: true
+  strict_dance_std: true
+  rank_transform: gaussian
+  rank_transform_components: true
+  state_pool_max_size: 4096
+  prefer_token_level_adv: true
+  move_tensors_to_cpu: true
+  force_enable_logprob: true
+
+clip:
+  clip_range: 1e-2
+  adv_clip_max: 5.0
+  eps: 1e-8
+
+reward:
+  mode: rlvr_image
+  obs_key: agentview_rgb
+  obs_keys: null
+  pred_view_index: 0
+  use_multi_view: false
+  strict_num_views: false
+  use_full_time: false
+  time_align: tail
+  pred_time_index: -1
+  real_time_index: -1
+  aggregate: mean
+  time_aggregate: mean
+  view_aggregate: mean
+  layout_5d: btchw
+  layout_6d: auto
+  clamp_pred: true
+  lpips_micro_batch_size: 8
+  lpips_py_path: null
+  loss_weight:
+    lpips: 1.0
+    mse: 0.0
+    mae: 1.0
+    ssim: 0.0
+    psnr: 0.0
+  component_norm:
+    enable: true
+    alpha_from_loss_weight: true
+    keys: null
+    alpha: null
+
+wandb:
+  enable: true
+  project: null
+  entity: null
+  run_name: null
+  mode: online
+  log_every: 1
+  log_media: true
+  media_every: 20
+  val_media_every: 500
+  max_media_views: 2
+  max_media_frames: 16
+  media_fps: 8
+
+ref:
+  enable: true
+  checkpoint_path: null
+
+kl:
+  enable: true
+  coef: 2e-3
+  type: low_var_kl
+  adaptive:
+    enable: true
+    target: 0.01
+    factor: 1.5
+    lower_ratio: 0.5
+    min_coef: 1e-6
+    max_coef: 1.0
+
+entropy:
+  enable: false
+  coef: 1e-4
+
+validation:
+  enable: true
+  every: 20
+  num_groups: 1
+  group_size: ${grpo.group_size}
+  parallel_rollout_workers: 1
+  required_action_horizon: ${grpo.required_action_horizon}
+  drop_if_any_incomplete: ${grpo.drop_if_any_incomplete}
+  terminate_on_success: ${grpo.terminate_on_success}
+  decode_pred_obs: true
+  move_tensors_to_cpu: true
+  state_pool_max_size: 512
+  seed_offset: 100000
+
+train:
+  print_every: 10
+  save_every: 500
+  save_path: ${logdir}/models_grpo_online.pt

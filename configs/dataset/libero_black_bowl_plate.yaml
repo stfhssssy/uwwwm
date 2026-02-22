@@ -1,0 +1,7 @@
+defaults:
+  - template_libero
+  - _self_
+
+name: libero_black_bowl_plate
+hdf5_path_globs: /mnt/hdd/ssy/libero_data/datasets/libero_90/KITCHEN_SCENE1_put_the_black_bowl_on_the_plate_demo.hdf5
+buffer_path: /mnt/hdd/ssy/libero_data/datasets/libero_90/KITCHEN_SCENE1_put_the_black_bowl_on_the_plate_demo.zarr
